@@ -1,0 +1,118 @@
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: moodle-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - moodle-db-data:/var/lib/mysql
+    networks:
+      - moodle-net
+
+  php:
+    image: php:8.2-fpm
+    container_name: moodle-php
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - moodle-data:/var/www
+      - moodledata-storage:/var/moodledata
+    networks:
+      - moodle-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: moodle-nginx
+    restart: unless-stopped
+    depends_on:
+      - php
+    volumes:
+      - moodle-data:/var/www
+    command: >
+      sh -c "
+      echo '
+      server {
+          listen 80;
+          server_name _;
+
+          root /var/www/html;
+          index index.php index.html index.htm;
+
+          client_max_body_size 100M;
+
+          # location /moodle/ {              
+          #     try_files $uri $uri/ /moodle/index.php?$query_string;
+          # }
+
+          location / {
+                try_files $uri $uri/ /index.php?$query_string;
+          }
+
+          location ~ [^/]\.php(/|$$) {
+              fastcgi_split_path_info ^(.+\.php)(/.+)$$;
+              fastcgi_pass moodle-php:9000;
+              fastcgi_index index.php;
+              include fastcgi_params;
+              fastcgi_param SCRIPT_FILENAME $$document_root$$fastcgi_script_name;
+              fastcgi_param PATH_INFO $$fastcgi_path_info;
+          }
+
+          location ~ /\.ht {
+              deny all;
+          }
+      }
+      ' > /etc/nginx/conf.d/default.conf &&
+
+      nginx -g 'daemon off;'
+      "
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.moodle.entrypoints=web,websecure"
+      - "traefik.http.routers.moodle.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moodle.loadbalancer.server.port=80"
+    networks:
+      - moodle-net
+      - traefik-proxy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ftp:
+  #   image: fauria/vsftpd
+  #   container_name: habilidade-ftp
+  #   restart: unless-stopped
+  #   ports:
+  #     - "21:21"
+  #     - "21100-21110:21100-21110"
+  #   environment:
+  #     FTP_USER: habilidade
+  #     FTP_PASS: habilidade123
+  #     PASV_ADDRESS: 187.77.44.146
+  #     PASV_MIN_PORT: 21100
+  #     PASV_MAX_PORT: 21110
+  #   volumes:
+  #     - moodle-data:/home/vsftpd/habilidade
+  #     - moodledata-storage:/home/vsftpd/habilidade/moodledata
+  #   networks:
+  #     - moodle-net
+
+volumes:
+  moodle-db-data:
+  moodle-data:
+  moodledata-storage:
+
+networks:
+  moodle-net:
+    driver: bridge
+  traefik-proxy:
+    external: true

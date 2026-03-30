@@ -1,0 +1,155 @@
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: moodle-db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
+      - MARIADB_DATABASE=${MOODLE_DB_NAME:-moodle}
+      - MARIADB_USER=${MOODLE_DB_USER:-moodle}
+      - MARIADB_PASSWORD=${MOODLE_DB_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - moodle-internal
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MARIADB_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  moodle:
+    image: moodlehq/moodle-php-apache:8.3
+    container_name: moodle-app
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+    environment:
+      - MOODLE_HOST=${MOODLE_HOST:-moodle.you.tec.br}
+      - MOODLE_DB_NAME=${MOODLE_DB_NAME:-moodle}
+      - MOODLE_DB_USER=${MOODLE_DB_USER:-moodle}
+      - MOODLE_DB_PASSWORD=${MOODLE_DB_PASSWORD}
+      - PHP_INI-memory_limit=${PHP_MEMORY_LIMIT:-512M}
+      - PHP_INI-post_max_size=${PHP_POST_MAX_SIZE:-128M}
+      - PHP_INI-upload_max_filesize=${PHP_UPLOAD_MAX_FILESIZE:-128M}
+      - PHP_INI-max_execution_time=${PHP_MAX_EXECUTION_TIME:-300}
+    command: >
+      sh -lc "
+      set -e;
+
+      if ! command -v git >/dev/null 2>&1; then
+        apt-get -o Acquire::ForceIPv4=true update;
+        apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends git ca-certificates unzip curl;
+        rm -rf /var/lib/apt/lists/*;
+      fi;
+
+      if [ ! -d /var/www/html/admin ]; then
+        rm -rf /var/www/html/*;
+        git clone --depth 1 --branch ${MOODLE_BRANCH:-MOODLE_404_STABLE} https://github.com/moodle/moodle.git /var/www/html;
+      fi;
+
+      mkdir -p /var/www/moodledata;
+      chown -R www-data:www-data /var/www/moodledata;
+
+      if [ ! -f /var/www/html/config.php ]; then
+        php -r 'file_put_contents(\"/var/www/html/config.php\", \"<?php\\n\\nunset(\\$CFG);\\nglobal \\$CFG;\\n\\$CFG = new stdClass();\\n\\$CFG->dbtype    = \\\"mariadb\\\";\\n\\$CFG->dblibrary = \\\"native\\\";\\n\\$CFG->dbhost    = \\\"mariadb\\\";\\n\\$CFG->dbname    = getenv(\\\"MOODLE_DB_NAME\\\") ?: \\\"moodle\\\";\\n\\$CFG->dbuser    = getenv(\\\"MOODLE_DB_USER\\\") ?: \\\"moodle\\\";\\n\\$CFG->dbpass    = getenv(\\\"MOODLE_DB_PASSWORD\\\") ?: \\\"\\\";\\n\\$CFG->prefix    = \\\"mdl_\\\";\\n\\$CFG->dboptions = array(\\n  \\\"dbpersist\\\" => 0,\\n  \\\"dbport\\\" => 3306,\\n  \\\"dbsocket\\\" => \\\"\\\",\\n  \\\"dbcollation\\\" => \\\"utf8mb4_unicode_ci\\\",\\n);\\n\\$host = getenv(\\\"MOODLE_HOST\\\") ?: \\\"moodle.you.tec.br\\\";\\n\\$CFG->wwwroot = \\\"https://\\\" . \\$host;\\n\\$CFG->dataroot  = \\\"/var/www/moodledata\\\";\\n\\$CFG->admin     = \\\"admin\\\";\\n\\$CFG->directorypermissions = 02770;\\n\\$CFG->reverseproxy = true;\\n\\$CFG->sslproxy = true;\\nrequire_once(__DIR__ . \\\"/lib/setup.php\\\");\\n\");';
+      fi;
+
+      apache2-foreground
+            "
+    volumes:
+      - moodle_code:/var/www/html
+      - ./moodledata:/var/www/moodledata
+    networks:
+      - moodle-internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/login/index.php >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+
+  nginx:
+    image: nginx:alpine
+    container_name: moodle-nginx
+    restart: unless-stopped
+    depends_on:
+      - moodle
+    networks:
+      - moodle-internal
+      - traefik-proxy
+    command: >
+      sh -c "
+      echo '
+      server {
+          listen 80;
+
+          client_max_body_size 256m;
+          proxy_read_timeout 600s;
+          proxy_connect_timeout 60s;
+          proxy_send_timeout 600s;
+
+          location / {
+              resolver 127.0.0.11 ipv6=off valid=30s;
+              set $$upstream \"moodle:80\";
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$http_x_forwarded_proto;
+
+              proxy_http_version 1.1;
+              proxy_set_header Connection \"\";
+
+              proxy_pass http://$$upstream;
+          }
+      }
+      ' > /etc/nginx/conf.d/default.conf &&
+      nginx -g 'daemon off;'
+      "
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.middlewares.moodle-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.moodle-http.rule=Host(`${MOODLE_HOST:-moodle.you.tec.br}`)"
+      - "traefik.http.routers.moodle-http.entrypoints=web"
+      - "traefik.http.routers.moodle-http.middlewares=moodle-https"
+      - "traefik.http.routers.moodle.rule=Host(`${MOODLE_HOST:-moodle.you.tec.br}`)"
+      - "traefik.http.routers.moodle.entrypoints=websecure"
+      - "traefik.http.routers.moodle.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moodle.loadbalancer.server.port=80"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  moodle-cron:
+    image: moodlehq/moodle-php-apache:8.3
+    container_name: moodle-cron
+    restart: unless-stopped
+    depends_on:
+      - moodle
+    environment:
+      - MOODLE_DB_NAME=${MOODLE_DB_NAME:-moodle}
+      - MOODLE_DB_USER=${MOODLE_DB_USER:-moodle}
+      - MOODLE_DB_PASSWORD=${MOODLE_DB_PASSWORD}
+    volumes:
+      - moodle_code:/var/www/html
+      - ./moodledata:/var/www/moodledata
+    networks:
+      - moodle-internal
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - "while [ ! -f /var/www/html/config.php ]; do sleep 10; done; while true; do php -f /var/www/html/admin/cli/cron.php || true; sleep 60; done"
+
+volumes:
+  mariadb_data:
+  moodle_code:
+
+networks:
+  moodle-internal:
+    driver: bridge
+  traefik-proxy:
+    external: true

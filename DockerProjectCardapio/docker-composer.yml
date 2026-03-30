@@ -1,0 +1,136 @@
+services:
+
+  cardapio-php:
+    image: php:8.4-fpm
+    container_name: cardapio-php
+    restart: unless-stopped
+    working_dir: /var/www
+
+    volumes:
+      - cardapio-data:/var/www
+
+    command: >
+      bash -c "
+      apt-get update &&
+      apt-get install -y nano git unzip curl libzip-dev zip libicu-dev &&      
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
+      apt-get install -y nodejs &&
+
+      docker-php-ext-install pdo pdo_mysql zip intl bcmath &&
+
+      git config --global --add safe.directory /var/www &&
+
+      if [ ! -f /var/www/artisan ]; then
+        git clone https://github.com/curtytech/cardapio.git /var/www;
+      fi &&
+
+      cd /var/www &&
+
+      if [ ! -f /usr/local/bin/composer ]; then
+        curl -sS https://getcomposer.org/installer | php &&
+        mv composer.phar /usr/local/bin/composer;
+      fi &&
+
+      composer install --no-interaction --prefer-dist --optimize-autoloader &&
+
+      php artisan key:generate || true &&
+
+      chown -R www-data:www-data storage bootstrap/cache &&
+      chmod -R 775 storage bootstrap/cache &&
+      chmod -R 777 database &&
+
+      php-fpm -F
+      "
+
+    networks:
+      - traefik-proxy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    container_name: cardapio-nginx
+    restart: unless-stopped
+
+    volumes:
+      - cardapio-data:/var/www
+
+    command: >
+      sh -c "
+      echo '
+      server {
+          listen 80;
+
+          root /var/www/public;
+          index index.php index.html;
+
+          location / {
+              try_files $$uri $$uri/ /index.php?$$query_string;
+          }
+
+          location ~ \.php$$ {
+              fastcgi_pass cardapio-php:9000;
+              fastcgi_index index.php;
+              include fastcgi_params;
+              fastcgi_param SCRIPT_FILENAME $$document_root$$fastcgi_script_name;
+          }
+
+          location ~ /\.ht {
+              deny all;
+          }
+      }
+      ' > /etc/nginx/conf.d/default.conf &&
+
+      nginx -g 'daemon off;'
+      "
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-proxy"
+      - "traefik.http.routers.cardapio.rule=Host(`cardapio.you.tec.br`)"
+      - "traefik.http.routers.cardapio.entrypoints=web,websecure"
+      - "traefik.http.routers.cardapio.tls.certresolver=letsencrypt"
+      - "traefik.http.services.cardapio.loadbalancer.server.port=80"
+
+    networks:
+      - traefik-proxy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ftp:
+  #   image: fauria/vsftpd
+  #   container_name: cardapio-ftp
+  #   restart: unless-stopped
+
+  #   ports:
+  #     - "21:21"
+  #     - "21100-21110:21100-21110"
+
+  #   environment:
+  #     FTP_USER: cardapio
+  #     FTP_PASS: cardapio123
+  #     PASV_ADDRESS: 187.77.44.146
+  #     PASV_MIN_PORT: 21100
+  #     PASV_MAX_PORT: 21110
+
+  #   volumes:
+  #     - cardapio-data:/home/vsftpd/cardapio
+
+  #   networks:
+  #     - traefik-proxy
+
+volumes:
+  cardapio-data:
+
+networks:
+  traefik-proxy:
+    external: true
+

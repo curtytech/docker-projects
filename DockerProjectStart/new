@@ -1,0 +1,134 @@
+services:
+
+  startspace-php:
+    image: php:8.4-fpm
+    container_name: startspace-php
+    restart: unless-stopped
+    working_dir: /var/www
+
+    volumes:
+      - startspace-data:/var/www
+
+    command: >
+      bash -c "
+      apt-get update &&
+      apt-get install -y git unzip curl libzip-dev zip libicu-dev &&
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
+      apt-get install -y nodejs &&
+
+      docker-php-ext-install pdo pdo_mysql zip intl bcmath &&
+
+      git config --global --add safe.directory /var/www &&
+
+      if [ ! -f /var/www/artisan ]; then
+        git clone https://github.com/curtytech/start.space.git /var/www;
+      fi &&
+
+      cd /var/www &&
+
+      if [ ! -f /usr/local/bin/composer ]; then
+        curl -sS https://getcomposer.org/installer | php &&
+        mv composer.phar /usr/local/bin/composer;
+      fi &&
+
+      composer install --no-interaction --prefer-dist --optimize-autoloader &&
+
+      php artisan key:generate || true &&
+
+      chown -R www-data:www-data storage bootstrap/cache &&
+      chmod -R 775 storage bootstrap/cache &&
+
+      php-fpm -F
+      "
+
+    networks:
+      - traefik-proxy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: startspace-nginx
+  #   restart: unless-stopped
+
+  #   volumes:
+  #     - startspace-data:/var/www
+
+  #   command: >
+  #     sh -c "
+  #     echo '
+  #     server {
+  #         listen 80;
+
+  #         root /var/www/public;
+  #         index index.php index.html;
+
+  #         location / {
+  #             try_files $$uri $$uri/ /index.php?$$query_string;
+  #         }
+
+  #         location ~ \.php$$ {
+  #             fastcgi_pass startspace-php:9000;
+  #             fastcgi_index index.php;
+  #             include fastcgi_params;
+  #             fastcgi_param SCRIPT_FILENAME $$document_root$$fastcgi_script_name;
+  #         }
+
+  #         location ~ /\.ht {
+  #             deny all;
+  #         }
+  #     }
+  #     ' > /etc/nginx/conf.d/default.conf &&
+
+  #     nginx -g 'daemon off;'
+  #     "
+
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.docker.network=traefik-proxy"
+  #     - "traefik.http.routers.startspace.rule=Host(`vps.you.tec.br`)"
+  #     - "traefik.http.routers.startspace.entrypoints=web,websecure"
+  #     - "traefik.http.routers.startspace.tls.certresolver=letsencrypt"
+  #     - "traefik.http.services.startspace.loadbalancer.server.port=80"
+
+  #   networks:
+  #     - traefik-proxy
+
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # ftp:
+  #   image: fauria/vsftpd
+  #   container_name: startspace-ftp
+  #   restart: unless-stopped
+
+  #   ports:
+  #     - "21:21"
+  #     - "21100-21110:21100-21110"
+
+  #   environment:
+  #     FTP_USER: startspace
+  #     FTP_PASS: startspace123
+  #     PASV_ADDRESS: 187.77.44.146
+  #     PASV_MIN_PORT: 21100
+  #     PASV_MAX_PORT: 21110
+
+  #   volumes:
+  #     - startspace-data:/home/vsftpd/startspace
+
+  #   networks:
+  #     - traefik-proxy
+
+volumes:
+  startspace-data:
+
+networks:
+  traefik-proxy:
+    external: true
