@@ -7,7 +7,8 @@ free -h
 ## Pasta de config nginx
  /etc/nginx/conf.d/default.conf
 
-
+## Pasta de config php
+nano /usr/local/etc/php/php.ini
 
 
 server {
