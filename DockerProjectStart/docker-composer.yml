@@ -1,18 +1,18 @@
 services:
 
-  startspace-php:
+  laravel-php:
     image: php:8.4-fpm
-    container_name: startspace-php
+    container_name: laravel-php
     restart: unless-stopped
     working_dir: /var/www
 
     volumes:
-      - startspace-data:/var/www
+      - laravel-data:/var/www
 
     command: >
       bash -c "
       apt-get update &&
-      apt-get install -y nano git unzip curl libzip-dev zip libicu-dev &&      
+      apt-get install -y git unzip curl libzip-dev zip libicu-dev &&
       curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
       apt-get install -y nodejs &&
 
@@ -37,7 +37,6 @@ services:
 
       chown -R www-data:www-data storage bootstrap/cache &&
       chmod -R 775 storage bootstrap/cache &&
-      chmod -R 777 database &&
 
       php-fpm -F
       "
@@ -53,11 +52,11 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: startspace-nginx
+    container_name: laravel-nginx
     restart: unless-stopped
 
     volumes:
-      - startspace-data:/var/www
+      - laravel-data:/var/www
 
     command: >
       sh -c "
@@ -65,7 +64,7 @@ services:
       server {
           listen 80;
 
-          root /var/www/html/public;
+          root /var/www/public;
           index index.php index.html;
 
           location / {
@@ -73,7 +72,7 @@ services:
           }
 
           location ~ \.php$$ {
-              fastcgi_pass startspace-php:9000;
+              fastcgi_pass laravel-php:9000;
               fastcgi_index index.php;
               include fastcgi_params;
               fastcgi_param SCRIPT_FILENAME $$document_root$$fastcgi_script_name;
@@ -91,10 +90,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      - "traefik.http.routers.startspace.rule=Host(`vps.you.tec.br`)"
-      - "traefik.http.routers.startspace.entrypoints=web,websecure"
-      - "traefik.http.routers.startspace.tls.certresolver=letsencrypt"
-      - "traefik.http.services.startspace.loadbalancer.server.port=80"
+      - "traefik.http.routers.laravel.rule=Host(`start.you.tec.br`)"
+      - "traefik.http.routers.laravel.entrypoints=web,websecure"
+      - "traefik.http.routers.laravel.tls.certresolver=letsencrypt"
+      - "traefik.http.services.laravel.loadbalancer.server.port=80"
 
     networks:
       - traefik-proxy
@@ -107,7 +106,7 @@ services:
 
   # ftp:
   #   image: fauria/vsftpd
-  #   container_name: startspace-ftp
+  #   container_name: laravel-ftp
   #   restart: unless-stopped
 
   #   ports:
@@ -115,22 +114,21 @@ services:
   #     - "21100-21110:21100-21110"
 
   #   environment:
-  #     FTP_USER: startspace
-  #     FTP_PASS: startspace123
+  #     FTP_USER: laravel
+  #     FTP_PASS: laravel123
   #     PASV_ADDRESS: 187.77.44.146
   #     PASV_MIN_PORT: 21100
   #     PASV_MAX_PORT: 21110
 
   #   volumes:
-  #     - startspace-data:/home/vsftpd/startspace
+  #     - laravel-data:/home/vsftpd/laravel
 
   #   networks:
   #     - traefik-proxy
 
 volumes:
-  startspace-data:
+  laravel-data:
 
 networks:
   traefik-proxy:
     external: true
-

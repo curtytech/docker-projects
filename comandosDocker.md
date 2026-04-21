@@ -10,6 +10,23 @@ free -h
 ## Pasta de config php
 nano /usr/local/etc/php/php.ini
 
+## Composer production
+composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
+## Composer dump-autoload -o
+composer dump-autoload -o
+
+
+## Configurar trustProxies para upload
+arquivo bootstrap/app.php
+" $middleware->trustProxies(at: '*');"
+
+php artisan config:clear
+php artisan config:clear
+php artisan cache:clear
+
+## Limpa tudo Esse é o mais completo — limpa: cache geral rotas views config eventos
+php artisan optimize:clear
 
 server {
     listen 80;

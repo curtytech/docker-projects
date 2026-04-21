@@ -1,18 +1,18 @@
 services:
 
-  card-php:
+  cardapio-php:
     image: php:8.4-fpm
-    container_name: card-php
+    container_name: cardapio-php
     restart: unless-stopped
     working_dir: /var/www
 
     volumes:
-      - card-data:/var/www
+      - cardapio-data:/var/www
 
     command: >
       bash -c "
       apt-get update &&
-      apt-get install -y git unzip curl libzip-dev zip libicu-dev &&
+      apt-get install -y nano git unzip curl libzip-dev zip libicu-dev &&      
       curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
       apt-get install -y nodejs &&
 
@@ -21,7 +21,7 @@ services:
       git config --global --add safe.directory /var/www &&
 
       if [ ! -f /var/www/artisan ]; then
-        git clone https://github.com/curtytech/business-card.git /var/www;
+        git clone https://github.com/curtytech/cardapio.git /var/www;
       fi &&
 
       cd /var/www &&
@@ -37,6 +37,7 @@ services:
 
       chown -R www-data:www-data storage bootstrap/cache &&
       chmod -R 775 storage bootstrap/cache &&
+      chmod -R 777 database &&
 
       php-fpm -F
       "
@@ -52,11 +53,11 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: card-nginx
+    container_name: cardapio-nginx
     restart: unless-stopped
 
     volumes:
-      - card-data:/var/www
+      - cardapio-data:/var/www
 
     command: >
       sh -c "
@@ -72,11 +73,15 @@ services:
           }
 
           location ~ \.php$$ {
-              fastcgi_pass card-php:9000;
+              fastcgi_pass cardapio-php:9000;
               fastcgi_index index.php;
               include fastcgi_params;
               fastcgi_param SCRIPT_FILENAME $$document_root$$fastcgi_script_name;
           }
+
+          # location /storage {
+          #     alias /var/www/public/storage;
+          # }
 
           location ~ /\.ht {
               deny all;
@@ -90,10 +95,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      - "traefik.http.routers.card.rule=Host(`card.you.tec.br`)"
-      - "traefik.http.routers.card.entrypoints=web,websecure"
-      - "traefik.http.routers.card.tls.certresolver=letsencrypt"
-      - "traefik.http.services.card.loadbalancer.server.port=80"
+      - "traefik.http.routers.cardapio.rule=Host(`cardapio.you.tec.br`)"
+      - "traefik.http.routers.cardapio.entrypoints=web,websecure"
+      - "traefik.http.routers.cardapio.tls.certresolver=letsencrypt"
+      - "traefik.http.services.cardapio.loadbalancer.server.port=80"
 
     networks:
       - traefik-proxy
@@ -104,30 +109,30 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ftp:
-  #   image: fauria/vsftpd
-  #   container_name: card-ftp
-  #   restart: unless-stopped
+  ftp:
+    image: fauria/vsftpd
+    container_name: cardapio-ftp
+    restart: unless-stopped
 
-  #   ports:
-  #     - "21:21"
-  #     - "21100-21110:21100-21110"
+    ports:
+      - "21:21"
+      - "21100-21110:21100-21110"
 
-  #   environment:
-  #     FTP_USER: card
-  #     FTP_PASS: card123
-  #     PASV_ADDRESS: 187.77.44.146
-  #     PASV_MIN_PORT: 21100
-  #     PASV_MAX_PORT: 21110
+    environment:
+      FTP_USER: cardapio
+      FTP_PASS: cardapio123
+      PASV_ADDRESS: 187.77.44.146
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
 
-  #   volumes:
-  #     - card-data:/home/vsftpd/card
+    volumes:
+      - cardapio-data:/home/vsftpd/cardapio
 
-  #   networks:
-  #     - traefik-proxy
+    networks:
+      - traefik-proxy
 
 volumes:
-  card-data:
+  cardapio-data:
 
 networks:
   traefik-proxy:
