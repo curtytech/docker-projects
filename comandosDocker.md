@@ -21,9 +21,18 @@ composer dump-autoload -o
 arquivo bootstrap/app.php
 " $middleware->trustProxies(at: '*');"
 
+## AppServiceProvider
+"public function boot(): void
+    {
+        URL::forceScheme('https');
+    }"
+
 php artisan config:clear
 php artisan config:clear
 php artisan cache:clear
+
+chown -R www-data:www-data storage bootstrap/cache
+chmod -R 775 storage bootstrap/cache
 
 ## Limpa tudo Esse é o mais completo — limpa: cache geral rotas views config eventos
 php artisan optimize:clear
